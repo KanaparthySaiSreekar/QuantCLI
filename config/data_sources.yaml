@@ -1,0 +1,282 @@
+# Data Source Configuration
+# Comprehensive configuration for all data providers
+
+alpha_vantage:
+  enabled: true
+  api_key: ${ALPHA_VANTAGE_API_KEY}
+  base_url: "https://www.alphavantage.co/query"
+  rate_limits:
+    calls_per_day: 25
+    calls_per_minute: 5
+  retry:
+    max_attempts: 3
+    backoff_factor: 2
+    backoff_max: 60
+  timeout: 30
+  cache_ttl_seconds: 86400  # 24 hours for EOD data
+  endpoints:
+    daily: "TIME_SERIES_DAILY"
+    intraday: "TIME_SERIES_INTRADAY"
+    weekly: "TIME_SERIES_WEEKLY"
+    monthly: "TIME_SERIES_MONTHLY"
+    quote: "GLOBAL_QUOTE"
+    news_sentiment: "NEWS_SENTIMENT"
+
+tiingo:
+  enabled: true
+  api_key: ${TIINGO_API_KEY}
+  base_url: "https://api.tiingo.com/tiingo"
+  rate_limits:
+    symbols_per_hour: 50
+    requests_per_hour: 500
+    concurrent_requests: 10
+  retry:
+    max_attempts: 3
+    backoff_factor: 2
+  timeout: 30
+  historical_years: 30
+  cache_ttl_seconds: 86400
+  endpoints:
+    daily: "/daily"
+    prices: "/daily/{ticker}/prices"
+    meta: "/daily/{ticker}"
+    iex: "/iex"
+
+fred:
+  enabled: true
+  api_key: ${FRED_API_KEY}
+  base_url: "https://api.stlouisfed.org/fred"
+  rate_limits:
+    unlimited: true
+  retry:
+    max_attempts: 3
+    backoff_factor: 1
+  timeout: 30
+  cache_ttl_seconds: 3600  # 1 hour for macro data
+  series:
+    vix:
+      id: "VIXCLS"
+      name: "CBOE Volatility Index"
+      frequency: "daily"
+    treasury_10y:
+      id: "DGS10"
+      name: "10-Year Treasury Constant Maturity Rate"
+      frequency: "daily"
+    treasury_2y:
+      id: "DGS2"
+      name: "2-Year Treasury Constant Maturity Rate"
+      frequency: "daily"
+    fed_funds:
+      id: "DFF"
+      name: "Federal Funds Effective Rate"
+      frequency: "daily"
+    dollar_index:
+      id: "DTWEXBGS"
+      name: "Trade Weighted U.S. Dollar Index"
+      frequency: "daily"
+    unemployment:
+      id: "UNRATE"
+      name: "Unemployment Rate"
+      frequency: "monthly"
+    gdp:
+      id: "GDP"
+      name: "Gross Domestic Product"
+      frequency: "quarterly"
+    cpi:
+      id: "CPIAUCSL"
+      name: "Consumer Price Index"
+      frequency: "monthly"
+
+finnhub:
+  enabled: true
+  api_key: ${FINNHUB_API_KEY}
+  base_url: "https://finnhub.io/api/v1"
+  rate_limits:
+    calls_per_minute: 60
+    calls_per_month: 60000  # Free tier
+  retry:
+    max_attempts: 3
+    backoff_factor: 2
+  timeout: 30
+  cache_ttl_seconds: 900  # 15 minutes for news
+  endpoints:
+    quote: "/quote"
+    news: "/news"
+    sentiment: "/news-sentiment"
+    company: "/stock/profile2"
+    peers: "/stock/peers"
+    earnings: "/calendar/earnings"
+
+polygon:
+  enabled: true
+  api_key: ${POLYGON_API_KEY}
+  base_url: "https://api.polygon.io"
+  rate_limits:
+    calls_per_minute: 5  # Free tier
+  retry:
+    max_attempts: 3
+    backoff_factor: 3
+  timeout: 30
+  cache_ttl_seconds: 86400
+  features:
+    real_time: false  # Requires paid tier
+    historical_years: 2  # Free tier limit
+    websocket: false  # Requires paid tier
+
+reddit:
+  enabled: true
+  client_id: ${REDDIT_CLIENT_ID}
+  client_secret: ${REDDIT_CLIENT_SECRET}
+  user_agent: ${REDDIT_USER_AGENT}
+  rate_limits:
+    queries_per_minute: 60  # Conservative limit
+  retry:
+    max_attempts: 3
+    backoff_factor: 2
+  timeout: 30
+  subreddits:
+    - "wallstreetbets"
+    - "stocks"
+    - "investing"
+    - "StockMarket"
+    - "options"
+    - "algotrading"
+  post_limit: 100
+  comment_limit: 500
+  lookback_hours: 24
+
+gdelt:
+  enabled: true
+  base_url: "https://api.gdeltproject.org/api/v2"
+  rate_limits:
+    queries_per_minute: 10
+  retry:
+    max_attempts: 3
+    backoff_factor: 2
+  timeout: 60
+  cache_ttl_seconds: 900  # 15 minutes
+  endpoints:
+    doc: "/doc/doc"
+    tv: "/tv/tv"
+  languages:
+    - "English"
+  max_records: 250
+  sort_by: "DateDesc"
+
+yfinance:
+  enabled: true  # Fallback only
+  priority: 99  # Lowest priority
+  rate_limits:
+    requests_per_second: 0.5  # Conservative
+    max_retries: 5
+  retry:
+    max_attempts: 5
+    backoff_factor: 3
+    jitter: true
+  timeout: 30
+  user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+  cache_ttl_seconds: 3600
+  features:
+    validate_data: true
+    repair: true
+    keepna: false
+
+# Data source failover cascade
+failover:
+  enabled: true
+  cascade:
+    daily_prices:
+      primary: "tiingo"
+      secondary: "alpha_vantage"
+      tertiary: "yfinance"
+      fallback: "polygon"
+
+    intraday:
+      primary: "alpha_vantage"
+      secondary: "polygon"
+      fallback: "finnhub"
+
+    fundamentals:
+      primary: "alpha_vantage"
+      secondary: "finnhub"
+
+    news:
+      primary: "finnhub"
+      secondary: "gdelt"
+      tertiary: "alpha_vantage"
+
+    sentiment:
+      primary: "reddit"
+      secondary: "finnhub"
+
+    macro:
+      primary: "fred"
+
+# Data quality settings
+quality:
+  validation:
+    enabled: true
+    min_data_points: 100
+    max_missing_pct: 5.0
+    outlier_detection: true
+    outlier_std_threshold: 5.0
+
+  reconciliation:
+    enabled: true
+    multi_source_validation: true
+    consensus_method: "median"  # median, mean, vote
+    max_deviation_pct: 0.5  # Flag if sources differ >0.5%
+
+  corporate_actions:
+    adjust_splits: true
+    adjust_dividends: true
+    validate_adjustments: true
+
+# Storage settings
+storage:
+  local_database:
+    enabled: true
+    connection: ${DATABASE_URL}
+    schema: "market_data"
+    batch_size: 1000
+    commit_interval: 5000
+
+  caching:
+    enabled: true
+    backend: "redis"
+    ttl_strategy: "adaptive"  # Fixed, adaptive, or custom
+    eviction_policy: "lru"
+    compression: true
+
+  archival:
+    enabled: true
+    compress_old_data: true
+    archive_after_days: 365
+    delete_after_years: 10
+
+# Update schedule (cron expressions in UTC)
+schedule:
+  daily_eod:
+    cron: "0 22 * * 1-5"  # 10 PM UTC (6 PM EST after market close)
+    enabled: true
+
+  macro_indicators:
+    cron: "0 12 * * *"  # Noon UTC daily
+    enabled: true
+
+  news_sentiment:
+    cron: "*/15 * * * *"  # Every 15 minutes
+    enabled: true
+
+  fundamental_data:
+    cron: "0 3 * * 0"  # 3 AM UTC on Sundays
+    enabled: true
+
+# Data export
+export:
+  formats:
+    - "parquet"
+    - "csv"
+    - "hdf5"
+  compression: "gzip"
+  encryption: false
