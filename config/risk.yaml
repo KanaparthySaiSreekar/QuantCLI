@@ -1,0 +1,413 @@
+# Risk Management Configuration
+# Pre-trade checks, position limits, kill switches, real-time monitoring
+
+# Position Limits
+position_limits:
+  # Per-security limits
+  max_position_size_pct: 2.0  # % of portfolio
+  max_position_value_usd: 5000
+  min_position_value_usd: 100
+
+  # Sector exposure
+  max_sector_exposure_pct: 20.0
+  max_industry_exposure_pct: 15.0
+
+  # Correlation clustering
+  max_correlation_cluster_pct: 30.0
+  correlation_threshold: 0.7
+
+  # Geographic exposure
+  max_country_exposure_pct: 100.0  # US only for now
+
+  # Asset class limits
+  max_equity_exposure_pct: 100.0
+  max_options_exposure_pct: 20.0
+  max_futures_exposure_pct: 0.0
+
+  # Leverage limits
+  max_gross_leverage: 1.0  # No leverage initially
+  max_net_leverage: 1.0
+
+# Order Limits
+order_limits:
+  # Size limits
+  max_order_quantity: 1000
+  max_order_value_usd: 50000
+  min_order_value_usd: 100
+
+  # Rate limits
+  max_orders_per_second: 10
+  max_orders_per_minute: 100
+  max_orders_per_hour: 1000
+  max_orders_per_day: 5000
+
+  # Order value limits
+  max_daily_order_value_usd: 100000
+  max_weekly_order_value_usd: 250000  # LRS limit consideration
+
+  # Cancel limits
+  max_cancels_per_order: 5
+  max_cancel_rate_pct: 20.0  # Max 20% cancel rate
+
+# Loss Limits
+loss_limits:
+  # Daily limits
+  max_daily_loss_usd: 5000
+  max_daily_loss_pct: 2.0  # % of portfolio
+
+  # Weekly limits
+  max_weekly_loss_usd: 15000
+  max_weekly_loss_pct: 5.0
+
+  # Monthly limits
+  max_monthly_loss_usd: 30000
+  max_monthly_loss_pct: 10.0
+
+  # Drawdown limits
+  max_drawdown_pct: 15.0
+  max_consecutive_losses: 5
+
+  # Per-position limits
+  max_position_loss_pct: 10.0  # Stop loss per position
+
+# Pre-Trade Risk Checks
+pre_trade_checks:
+  enabled: true
+  execution_timeout_us: 10  # microseconds
+
+  checks:
+    - name: "position_limit"
+      enabled: true
+      blocking: true
+      priority: 1
+
+    - name: "order_size"
+      enabled: true
+      blocking: true
+      priority: 2
+
+    - name: "price_reasonability"
+      enabled: true
+      blocking: true
+      priority: 3
+      params:
+        max_deviation_pct: 10.0  # From last trade
+        check_nbbo: true
+
+    - name: "fat_finger"
+      enabled: true
+      blocking: true
+      priority: 4
+      params:
+        max_price_change_pct: 20.0
+        max_quantity_multiple: 10
+
+    - name: "duplicate_order"
+      enabled: true
+      blocking: true
+      priority: 5
+      params:
+        time_window_seconds: 1
+
+    - name: "market_hours"
+      enabled: true
+      blocking: false
+      priority: 6
+      params:
+        allow_pre_market: true
+        allow_post_market: true
+
+    - name: "symbol_validation"
+      enabled: true
+      blocking: true
+      priority: 7
+
+    - name: "account_balance"
+      enabled: true
+      blocking: true
+      priority: 8
+
+    - name: "risk_budget"
+      enabled: true
+      blocking: true
+      priority: 9
+
+    - name: "concentration"
+      enabled: true
+      blocking: false
+      priority: 10
+
+# Kill Switches
+kill_switches:
+  enabled: true
+
+  triggers:
+    daily_loss_breach:
+      enabled: true
+      action: "halt_trading"  # halt_trading, cancel_orders, liquidate_positions
+      threshold_pct: 2.0
+
+    position_limit_breach:
+      enabled: true
+      action: "cancel_orders"
+
+    exchange_connectivity_loss:
+      enabled: true
+      action: "halt_trading"
+      timeout_seconds: 30
+
+    data_feed_stale:
+      enabled: true
+      action: "halt_trading"
+      staleness_seconds: 60
+
+    excessive_slippage:
+      enabled: true
+      action: "cancel_orders"
+      threshold_pct: 1.0
+
+    high_volatility:
+      enabled: true
+      action: "reduce_positions"
+      vix_threshold: 40
+
+    margin_call:
+      enabled: true
+      action: "liquidate_positions"
+
+    manual_trigger:
+      enabled: true
+      action: "halt_trading"
+
+  actions:
+    halt_trading:
+      cancel_pending_orders: true
+      reject_new_orders: true
+      notification: true
+
+    cancel_orders:
+      cancel_all_pending: true
+
+    reduce_positions:
+      target_reduction_pct: 50.0
+      prioritize_by: "risk"  # risk, size, loss
+
+    liquidate_positions:
+      close_all: false
+      close_losing: true
+      urgency: "immediate"  # immediate, normal
+
+  recovery:
+    auto_resume: false
+    manual_approval_required: true
+    cooldown_minutes: 60
+
+# Real-Time Monitoring
+real_time_monitoring:
+  enabled: true
+  update_frequency_ms: 100
+
+  metrics:
+    pnl:
+      realized: true
+      unrealized: true
+      total: true
+      by_position: true
+      by_strategy: true
+
+    risk_metrics:
+      var_95: true
+      var_99: true
+      cvar_95: true
+      max_drawdown: true
+      sharpe_ratio: true
+      sortino_ratio: true
+
+    exposure:
+      gross_exposure: true
+      net_exposure: true
+      long_exposure: true
+      short_exposure: true
+      sector_exposure: true
+
+    execution:
+      fill_rate: true
+      slippage: true
+      latency_p50: true
+      latency_p99: true
+      order_rejection_rate: true
+
+  alerts:
+    channels:
+      - "log"
+      - "email"
+      - "sms"
+      - "webhook"
+
+    severity_levels:
+      critical:
+        - "kill_switch_triggered"
+        - "margin_call"
+        - "exchange_disconnection"
+
+      warning:
+        - "approaching_daily_loss_limit"
+        - "high_slippage"
+        - "position_limit_90pct"
+
+      info:
+        - "large_pnl_swing"
+        - "new_position_opened"
+        - "strategy_signal"
+
+# Position Sizing
+position_sizing:
+  method: "kelly"  # fixed, kelly, volatility_based, risk_parity
+
+  kelly_criterion:
+    enabled: true
+    fractional_kelly: 0.25  # Use 1/4 Kelly for safety
+    min_edge: 0.02  # Minimum 2% edge required
+    max_allocation: 0.05  # Max 5% per position
+
+  volatility_based:
+    enabled: false
+    target_volatility: 0.15  # 15% annualized
+    lookback_days: 60
+    vol_model: "garch"  # ewma, garch
+
+  risk_parity:
+    enabled: false
+    target_risk_contribution: "equal"
+
+  fixed:
+    position_size_usd: 1000
+
+# VaR (Value at Risk) Calculation
+var:
+  enabled: true
+
+  methods:
+    - name: "historical"
+      confidence_level: 0.95
+      lookback_days: 252
+
+    - name: "parametric"
+      confidence_level: 0.95
+      distribution: "normal"
+
+    - name: "monte_carlo"
+      confidence_level: 0.95
+      n_simulations: 10000
+
+  calculation_frequency: "daily"
+  include_options: true
+
+# Stress Testing
+stress_testing:
+  enabled: true
+  frequency: "weekly"
+
+  scenarios:
+    historical:
+      - name: "2008_financial_crisis"
+        equity_shock: -0.37
+        vol_shock: 2.5
+
+      - name: "2020_covid_crash"
+        equity_shock: -0.34
+        vol_shock: 3.0
+
+      - name: "2011_flash_crash"
+        equity_shock: -0.09
+        duration_minutes: 36
+
+    hypothetical:
+      - name: "severe_market_crash"
+        equity_shock: -0.50
+        vol_shock: 4.0
+
+      - name: "interest_rate_shock"
+        rate_shock_bps: 200
+
+      - name: "liquidity_crisis"
+        spread_widening: 5.0
+
+  single_factor:
+    vix_up: +200
+    sp500_down: -30
+    rates_up: +200
+    dollar_up: +20
+
+  reverse_stress:
+    enabled: true
+    target_loss_pct: 20.0
+
+# Greeks Calculation (for options)
+greeks:
+  enabled: true
+  calculation_method: "black_scholes"
+
+  metrics:
+    delta: true
+    gamma: true
+    theta: true
+    vega: true
+    rho: true
+
+  portfolio_greeks:
+    aggregate: true
+    by_underlying: true
+
+# Margin Requirements
+margin:
+  type: "cash"  # cash, margin
+
+  if_margin_enabled:
+    initial_margin_pct: 50.0
+    maintenance_margin_pct: 30.0
+    margin_call_threshold_pct: 35.0
+    liquidation_threshold_pct: 30.0
+
+# Compliance Checks
+compliance:
+  pattern_day_trader:
+    enabled: true
+    min_account_value: 25000
+    max_day_trades_per_5days: 3
+
+  wash_sale:
+    enabled: true
+    lookback_days: 30
+
+  short_sale_restrictions:
+    enabled: true
+    sho_regulation: true
+
+  position_limits:
+    options_per_side: 250000  # CBOE limit
+
+# Risk Reporting
+reporting:
+  frequency: "daily"
+
+  reports:
+    - name: "daily_risk_summary"
+      includes:
+        - pnl
+        - positions
+        - exposures
+        - var
+        - limits_usage
+
+    - name: "weekly_risk_review"
+      includes:
+        - performance_attribution
+        - stress_test_results
+        - limit_breaches
+        - trade_analysis
+
+  distribution:
+    email: true
+    dashboard: true
+    storage: true

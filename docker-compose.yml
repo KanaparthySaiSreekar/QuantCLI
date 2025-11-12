@@ -1,0 +1,364 @@
+version: '3.8'
+
+services:
+  # TimescaleDB for time-series market data
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: quantcli-timescaledb
+    environment:
+      POSTGRES_USER: quantcli
+      POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD:-changeme}
+      POSTGRES_DB: quantcli
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./docker/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: postgres -c shared_preload_libraries=timescaledb -c max_connections=200
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantcli"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+
+  # Redis Cluster for high-performance caching
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: quantcli-redis-1
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7000:6379"
+    volumes:
+      - redis-1-data:/data
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: quantcli-redis-2
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7001:6379"
+    volumes:
+      - redis-2-data:/data
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: quantcli-redis-3
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7002:6379"
+    volumes:
+      - redis-3-data:/data
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+
+  # Redis Cluster initialization
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: quantcli-redis-cluster-init
+    command: >
+      sh -c "sleep 5 && redis-cli --cluster create
+      redis-node-1:6379 redis-node-2:6379 redis-node-3:6379
+      --cluster-replicas 0 --cluster-yes"
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+    networks:
+      - quantcli-network
+
+  # Apache Kafka for event streaming
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: quantcli-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: quantcli-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Schema Registry for Kafka
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    container_name: quantcli-schema-registry
+    depends_on:
+      - kafka
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    ports:
+      - "8081:8081"
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/subjects || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: quantcli-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: quantcli-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: quantcli-jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: :9411
+      COLLECTOR_OTLP_ENABLED: true
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"  # Jaeger UI
+      - "14250:14250"
+      - "14268:14268"
+      - "14269:14269"
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+      - "9411:9411"
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+
+  # Elasticsearch for DataHub (lineage tracking)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: quantcli-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Neo4j for DataHub graph storage
+  neo4j:
+    image: neo4j:5.14.0
+    container_name: quantcli-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-changeme}
+      NEO4J_dbms_default__database: datahub
+      NEO4J_dbms_allow__upgrade: true
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j-data:/data
+    networks:
+      - quantcli-network
+    restart: unless-stopped
+
+  # MLflow for ML experiment tracking
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: quantcli-mlflow
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://quantcli:${TIMESCALE_PASSWORD:-changeme}@timescaledb:5432/mlflow
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    networks:
+      - quantcli-network
+    depends_on:
+      - timescaledb
+    restart: unless-stopped
+
+  # pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: quantcli-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@quantcli.com
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - quantcli-network
+    depends_on:
+      - timescaledb
+    restart: unless-stopped
+
+  # Celery worker for async tasks
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: quantcli-celery-worker
+    command: celery -A src.infrastructure.tasks worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis-node-1:6379/0
+      - DATABASE_URL=postgresql://quantcli:${TIMESCALE_PASSWORD:-changeme}@timescaledb:5432/quantcli
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./data:/app/data
+    networks:
+      - quantcli-network
+    depends_on:
+      - redis-node-1
+      - timescaledb
+      - kafka
+    restart: unless-stopped
+
+  # Flower for Celery monitoring
+  flower:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: quantcli-flower
+    command: celery -A src.infrastructure.tasks flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis-node-1:6379/0
+    networks:
+      - quantcli-network
+    depends_on:
+      - celery-worker
+    restart: unless-stopped
+
+volumes:
+  timescale-data:
+  redis-1-data:
+  redis-2-data:
+  redis-3-data:
+  kafka-data:
+  zookeeper-data:
+  zookeeper-log:
+  prometheus-data:
+  grafana-data:
+  elasticsearch-data:
+  neo4j-data:
+  mlflow-artifacts:
+  pgadmin-data:
+
+networks:
+  quantcli-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16

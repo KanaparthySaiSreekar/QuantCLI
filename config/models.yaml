@@ -1,0 +1,327 @@
+# Machine Learning Models Configuration
+# Ensemble architecture with XGBoost, LightGBM, CatBoost, LSTM
+
+ensemble:
+  strategy: "stacking"  # stacking, blending, voting
+  n_base_models: 5
+  meta_learner_enabled: true
+
+  base_models:
+    xgboost_1:
+      type: "xgboost"
+      enabled: true
+      params:
+        objective: "reg:squarederror"
+        max_depth: 6
+        learning_rate: 0.1
+        n_estimators: 100
+        subsample: 0.8
+        colsample_bytree: 0.8
+        min_child_weight: 1
+        gamma: 0
+        reg_alpha: 0.1
+        reg_lambda: 1.0
+        random_state: 42
+        n_jobs: -1
+        tree_method: "hist"  # hist, gpu_hist for GPU
+      early_stopping:
+        enabled: true
+        rounds: 10
+        metric: "rmse"
+
+    xgboost_2:
+      type: "xgboost"
+      enabled: true
+      params:
+        objective: "reg:squarederror"
+        max_depth: 8
+        learning_rate: 0.05
+        n_estimators: 200
+        subsample: 0.7
+        colsample_bytree: 0.7
+        min_child_weight: 3
+        gamma: 0.1
+        reg_alpha: 0.3
+        reg_lambda: 1.5
+        random_state: 43
+        n_jobs: -1
+      diversity_params:
+        feature_fraction: 0.7
+
+    lightgbm_1:
+      type: "lightgbm"
+      enabled: true
+      params:
+        objective: "regression"
+        metric: "rmse"
+        num_leaves: 31
+        learning_rate: 0.1
+        n_estimators: 100
+        subsample: 0.8
+        colsample_bytree: 0.8
+        min_child_samples: 20
+        reg_alpha: 0.1
+        reg_lambda: 1.0
+        random_state: 44
+        n_jobs: -1
+        verbosity: -1
+      early_stopping:
+        enabled: true
+        rounds: 10
+
+    lightgbm_2:
+      type: "lightgbm"
+      enabled: true
+      params:
+        objective: "regression"
+        num_leaves: 50
+        learning_rate: 0.05
+        n_estimators: 200
+        subsample: 0.7
+        colsample_bytree: 0.7
+        min_child_samples: 30
+        reg_alpha: 0.2
+        reg_lambda: 1.5
+        random_state: 45
+        n_jobs: -1
+
+    catboost_1:
+      type: "catboost"
+      enabled: true
+      params:
+        iterations: 100
+        learning_rate: 0.1
+        depth: 6
+        l2_leaf_reg: 3.0
+        subsample: 0.8
+        random_strength: 1.0
+        border_count: 128
+        random_state: 46
+        verbose: false
+        thread_count: -1
+      early_stopping:
+        enabled: true
+        rounds: 10
+
+    lstm_1:
+      type: "lstm"
+      enabled: true
+      params:
+        hidden_size: 128
+        num_layers: 2
+        dropout: 0.2
+        bidirectional: false
+        sequence_length: 60
+        batch_size: 64
+        epochs: 50
+        learning_rate: 0.001
+        optimizer: "adam"
+      early_stopping:
+        enabled: true
+        patience: 5
+
+  meta_learner:
+    type: "xgboost"
+    params:
+      objective: "reg:squarederror"
+      max_depth: 3
+      learning_rate: 0.05
+      n_estimators: 50
+      subsample: 0.9
+      colsample_bytree: 0.9
+      random_state: 47
+    cv_folds: 5
+
+  weighting:
+    method: "bayesian_model_averaging"  # equal, performance, bayesian_model_averaging, learned
+    performance_window: 90  # days
+    reweight_frequency: 30  # days
+    min_weight: 0.05
+    max_weight: 0.40
+
+# Model Optimization
+optimization:
+  quantization:
+    enabled: true
+    method: "int8"  # int8, fp16, fp8, dynamic
+    calibration_samples: 1000
+    per_channel: true
+    symmetric: true
+
+  onnx:
+    enabled: true
+    opset_version: 17
+    optimization_level: "O2"  # O1, O2, O3
+    graph_optimization: true
+    inline_operations: true
+
+  intel_daal4py:
+    enabled: true
+    use_for_inference: true
+    models: ["xgboost", "lightgbm"]  # CatBoost has native optimization
+
+  distillation:
+    enabled: false  # Enable after initial training
+    teacher_ensemble_size: 10
+    student_model: "catboost"
+    temperature: 3.0
+    alpha: 0.7  # Weight for soft targets
+
+  pruning:
+    enabled: false
+    method: "magnitude"  # magnitude, structured
+    sparsity_target: 0.5
+
+# Feature Selection
+feature_selection:
+  method: "hybrid"  # filter, wrapper, embedded, hybrid
+
+  filter_methods:
+    - name: "variance_threshold"
+      threshold: 0.01
+    - name: "correlation"
+      threshold: 0.95
+
+  wrapper_methods:
+    - name: "rfe"
+      estimator: "lightgbm"
+      n_features_to_select: 50
+      step: 5
+
+  embedded_methods:
+    - name: "random_forest_importance"
+      n_estimators: 100
+      threshold: "median"
+    - name: "lasso"
+      alpha: 0.01
+
+  final_features:
+    min_features: 20
+    max_features: 100
+    target_features: 50
+
+# Training Configuration
+training:
+  validation_split: 0.2
+  cv_folds: 5
+  stratified: false  # For regression
+  shuffle: false  # Time series
+
+  data_preparation:
+    scaling: "robust"  # standard, minmax, robust, none
+    handle_missing: "forward_fill"
+    outlier_removal: true
+    outlier_method: "iqr"
+    outlier_threshold: 3.0
+
+  class_imbalance:
+    method: "none"  # Regression task
+
+  regularization:
+    dropout: 0.2
+    l1_ratio: 0.1
+    l2_ratio: 0.1
+
+# Hyperparameter Optimization
+hyperparameter_tuning:
+  enabled: false  # Run separately
+  framework: "optuna"  # optuna, hyperopt, ray
+
+  optuna:
+    n_trials: 100
+    timeout: 3600  # seconds
+    n_jobs: -1
+    sampler: "TPE"  # TPE, CMA-ES, Random
+    pruner: "Median"  # Median, Hyperband
+
+  search_space:
+    xgboost:
+      max_depth: [3, 10]
+      learning_rate: [0.01, 0.3]
+      n_estimators: [50, 500]
+      subsample: [0.6, 1.0]
+      colsample_bytree: [0.6, 1.0]
+
+    lightgbm:
+      num_leaves: [20, 100]
+      learning_rate: [0.01, 0.3]
+      n_estimators: [50, 500]
+
+    catboost:
+      depth: [4, 10]
+      learning_rate: [0.01, 0.3]
+      iterations: [50, 500]
+
+# Model Persistence
+persistence:
+  save_format: "joblib"  # joblib, pickle, onnx
+  versioning: true
+  compression: true
+  save_training_data: false
+  save_predictions: true
+
+  mlflow:
+    enabled: true
+    tracking_uri: ${MLFLOW_TRACKING_URI}
+    experiment_name: "quantcli-ensemble"
+    log_models: true
+    log_params: true
+    log_metrics: true
+    log_artifacts: true
+
+# Inference Configuration
+inference:
+  batch_size: 1000
+  use_gpu: false
+  num_threads: -1
+  optimize_for_latency: true
+
+  performance_targets:
+    max_latency_ms: 100
+    min_throughput: 1000  # predictions per second
+
+# Model Monitoring
+monitoring:
+  enabled: true
+
+  performance_metrics:
+    - "rmse"
+    - "mae"
+    - "r2"
+    - "sharpe_ratio"
+    - "max_drawdown"
+
+  drift_detection:
+    enabled: true
+    window_size: 1000
+    threshold: 0.05
+    methods:
+      - "psi"  # Population Stability Index
+      - "ks"   # Kolmogorov-Smirnov
+      - "jsd"  # Jensen-Shannon Divergence
+
+  retraining:
+    schedule: "quarterly"  # daily, weekly, monthly, quarterly
+    trigger_on_drift: true
+    min_samples: 10000
+
+# Explainability
+explainability:
+  enabled: true
+  methods:
+    - "feature_importance"
+    - "shap"  # For interpretation only, not feature selection
+    - "permutation_importance"
+  shap_samples: 1000
+
+# A/B Testing
+ab_testing:
+  enabled: false
+  champion_model: "ensemble_v1"
+  challenger_model: "ensemble_v2"
+  traffic_split: 0.8  # 80% champion, 20% challenger
+  evaluation_period_days: 30
+  metrics:
+    - "sharpe_ratio"
+    - "max_drawdown"
+    - "win_rate"

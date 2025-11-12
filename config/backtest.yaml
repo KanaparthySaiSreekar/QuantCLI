@@ -1,0 +1,409 @@
+# Backtesting Configuration
+# CPCV, walk-forward, realistic transaction costs, statistical validation
+
+# Validation Strategy
+validation:
+  primary_method: "cpcv"  # cpcv, walk_forward, k_fold, holdout
+
+  # Combinatorial Purged Cross-Validation
+  cpcv:
+    enabled: true
+    n_splits: 10
+    test_size: 0.3
+    n_test_groups: 3
+
+    # Temporal purging
+    purging:
+      enabled: true
+      method: "embargo"  # embargo, time_gap
+      embargo_pct: 0.05  # 5% of observations after test
+
+    # Remove overlapping observations
+    remove_overlap: true
+
+    # Parallel execution
+    n_jobs: -1
+
+  # Walk-Forward Analysis
+  walk_forward:
+    enabled: true
+
+    # Window configuration
+    train_period_months: 24
+    test_period_months: 6
+    step_size_months: 3  # Rolling step
+    n_windows: 5
+
+    # Anchored vs rolling
+    anchored: false  # false = rolling window
+
+    # Minimum data requirements
+    min_train_samples: 500
+    min_test_samples: 100
+
+    # Walk-Forward Efficiency
+    wfe_threshold: 0.60  # Minimum 60% for profitability
+
+  # Time-Series Split
+  time_series_split:
+    n_splits: 5
+    max_train_size: null
+    test_size: null
+    gap: 5  # Gap between train and test
+
+# Transaction Costs
+transaction_costs:
+  model: "realistic"  # simple, realistic, volume_based, ml_based
+
+  simple:
+    commission_pct: 0.001  # 10 basis points
+
+  realistic:
+    # Fixed costs
+    commission_per_share: 0.005
+    min_commission: 1.0
+    max_commission_pct: 0.01
+
+    # SEC fees (US equities)
+    sec_fee_per_dollar: 0.0000278  # $27.80 per million
+
+    # FINRA TAF
+    taf_per_share: 0.000166
+    max_taf_per_trade: 8.30
+
+    # Exchange fees
+    exchange_fee_per_share: 0.003
+    max_exchange_fee_pct: 0.003
+
+  # Slippage modeling
+  slippage:
+    model: "volume_based"  # fixed, volume_based, spread_based, ml_based
+
+    fixed:
+      slippage_bps: 2  # 2 basis points
+
+    volume_based:
+      base_slippage_bps: 2
+      volume_impact_factor: 0.1
+      max_slippage_bps: 50
+
+      # Order size as % of ADV (Average Daily Volume)
+      max_order_size_pct_adv: 5.0
+
+    spread_based:
+      bid_ask_half_spread_pct: 0.5  # Pay half spread
+      market_impact_multiplier: 1.5
+
+    ml_based:
+      features:
+        - relative_spread
+        - range_intensity
+        - volatility
+        - amihud_illiquidity
+        - order_size_pct_adv
+      model_path: "models/slippage_predictor.pkl"
+
+  # Market impact (for large orders)
+  market_impact:
+    enabled: true
+    model: "almgren_chriss"  # linear, sqrt, almgren_chriss
+
+    permanent_impact_factor: 0.1
+    temporary_impact_factor: 0.5
+
+  # Time-varying costs
+  time_of_day:
+    enabled: true
+    market_open_premium: 1.5  # 50% higher costs at open
+    market_close_premium: 1.3
+    lunch_discount: 0.9
+
+  # Stressed market conditions
+  stress_multiplier:
+    high_volatility: 2.0  # VIX > 30
+    low_liquidity: 1.5
+    news_events: 1.8
+
+# Execution Simulation
+execution:
+  # Fill modeling
+  fill_model: "realistic"  # immediate, next_bar, realistic, queue_position
+
+  realistic:
+    # Limit orders
+    limit_fill_probability:
+      at_touch: 0.7
+      one_tick_better: 0.3
+      two_ticks_better: 0.1
+
+    # Market orders
+    market_fill_delay_ms: 100
+    partial_fill_probability: 0.05
+
+  # Order types
+  allowed_order_types:
+    - "market"
+    - "limit"
+    - "stop"
+    - "stop_limit"
+
+  # Time-in-force
+  default_tif: "DAY"
+  allowed_tif:
+    - "DAY"
+    - "GTC"
+    - "IOC"
+    - "FOK"
+
+  # Partial fills
+  allow_partial_fills: true
+  min_fill_size: 10  # shares
+
+# Data Requirements
+data:
+  # Minimum data quality
+  min_data_points: 252  # ~1 year of daily data
+  max_missing_data_pct: 5.0
+
+  # Frequency
+  frequency: "daily"  # tick, minute, 5min, hourly, daily
+
+  # Lookback period
+  lookback_years: 10
+
+  # Validation period
+  in_sample_years: 7
+  out_of_sample_years: 3
+
+  # Data splits
+  train_pct: 0.6
+  validation_pct: 0.2
+  test_pct: 0.2
+
+  # Survivorship bias
+  include_delisted: true
+
+  # Corporate actions
+  adjust_for_splits: true
+  adjust_for_dividends: true
+
+# Performance Metrics
+metrics:
+  # Returns
+  returns:
+    - "total_return"
+    - "annualized_return"
+    - "cagr"
+    - "monthly_returns"
+    - "rolling_returns"
+
+  # Risk-adjusted
+  risk_adjusted:
+    - "sharpe_ratio"
+    - "sortino_ratio"
+    - "calmar_ratio"
+    - "omega_ratio"
+    - "information_ratio"
+
+  # Drawdown
+  drawdown:
+    - "max_drawdown"
+    - "max_drawdown_duration"
+    - "avg_drawdown"
+    - "drawdown_periods"
+
+  # Win rate
+  trading:
+    - "win_rate"
+    - "profit_factor"
+    - "avg_win"
+    - "avg_loss"
+    - "win_loss_ratio"
+    - "expectancy"
+
+  # Statistical
+  statistical:
+    - "probabilistic_sharpe_ratio"
+    - "deflated_sharpe_ratio"
+    - "skewness"
+    - "kurtosis"
+    - "var_95"
+    - "cvar_95"
+
+  # Execution
+  execution_quality:
+    - "avg_slippage"
+    - "fill_rate"
+    - "avg_holding_period"
+    - "turnover"
+    - "trade_count"
+
+# Probabilistic Sharpe Ratio
+probabilistic_sharpe_ratio:
+  enabled: true
+  benchmark_sharpe: 0.0
+  confidence_level: 0.95
+
+# Deflated Sharpe Ratio
+deflated_sharpe_ratio:
+  enabled: true
+  n_trials: 100  # Number of strategies tested
+  n_observations: null  # Auto-calculate from data
+  skewness_adj: true
+  kurtosis_adj: true
+
+# Monte Carlo Simulation
+monte_carlo:
+  enabled: true
+  n_simulations: 10000
+
+  methods:
+    - "bootstrap"  # Resample returns
+    - "parametric"  # Fit distribution
+
+  confidence_intervals:
+    - 0.05
+    - 0.25
+    - 0.5
+    - 0.75
+    - 0.95
+
+# Sensitivity Analysis
+sensitivity:
+  enabled: true
+
+  parameters:
+    transaction_costs:
+      min: 0.0
+      max: 0.01
+      steps: 10
+
+    slippage:
+      min: 0.0
+      max: 0.05
+      steps: 10
+
+    rebalance_frequency:
+      values: [1, 5, 10, 20]  # days
+
+# Benchmark Comparison
+benchmark:
+  enabled: true
+  symbols:
+    - "SPY"  # S&P 500
+    - "QQQ"  # Nasdaq 100
+    - "IWM"  # Russell 2000
+
+  metrics:
+    - "alpha"
+    - "beta"
+    - "tracking_error"
+    - "information_ratio"
+    - "up_capture"
+    - "down_capture"
+
+# Regime Analysis
+regime_analysis:
+  enabled: true
+
+  regimes:
+    bull_market:
+      condition: "spy_return > 0.15"  # annualized
+
+    bear_market:
+      condition: "spy_return < -0.10"
+
+    high_volatility:
+      condition: "vix > 30"
+
+    low_volatility:
+      condition: "vix < 15"
+
+    crisis:
+      periods:
+        - ["2008-09-01", "2009-03-31"]  # Financial crisis
+        - ["2020-02-19", "2020-04-07"]  # COVID crash
+
+# Overfitting Detection
+overfitting:
+  enabled: true
+
+  tests:
+    - name: "in_sample_vs_out_sample"
+      max_degradation_pct: 50.0
+
+    - name: "shuffle_test"
+      n_shuffles: 100
+      p_value_threshold: 0.05
+
+    - name: "parameter_sensitivity"
+      max_performance_change: 30.0
+
+    - name: "data_snooping"
+      probability_backtest_overfitting: true
+
+# Reporting
+reporting:
+  generate_html_report: true
+  generate_pdf_report: false
+
+  include_sections:
+    - "summary_statistics"
+    - "returns_analysis"
+    - "risk_metrics"
+    - "drawdown_analysis"
+    - "trade_analysis"
+    - "regime_performance"
+    - "comparison_to_benchmark"
+    - "statistical_tests"
+
+  plots:
+    - "equity_curve"
+    - "drawdown_chart"
+    - "monthly_returns_heatmap"
+    - "rolling_sharpe"
+    - "underwater_plot"
+    - "return_distribution"
+    - "qq_plot"
+
+  save_trades: true
+  save_positions: true
+  save_portfolio_values: true
+
+# Optimization
+optimization:
+  enabled: false  # Run separately
+
+  framework: "vectorbt"  # vectorbt, optuna, scipy
+
+  vectorbt:
+    param_grid:
+      # Example parameters
+      lookback_period: [10, 20, 50, 100, 200]
+      entry_threshold: [1.0, 1.5, 2.0, 2.5]
+      exit_threshold: [0.0, 0.5, 1.0]
+
+    objective: "sharpe_ratio"  # sharpe_ratio, total_return, calmar_ratio
+    n_jobs: -1
+
+  optuna:
+    n_trials: 1000
+    timeout: 7200
+    objective: "sharpe_ratio"
+
+  constraints:
+    min_sharpe: 0.5
+    max_drawdown: 0.25
+    min_trades: 50
+
+# Parallel Processing
+parallel:
+  enabled: true
+  n_jobs: -1
+  backend: "multiprocessing"  # multiprocessing, threading, dask
+
+# Caching
+cache:
+  enabled: true
+  cache_dir: "./cache/backtest"
+  ttl_seconds: 86400  # 24 hours
