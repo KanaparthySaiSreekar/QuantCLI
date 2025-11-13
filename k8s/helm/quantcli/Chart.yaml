@@ -1,0 +1,38 @@
+apiVersion: v2
+name: quantcli
+description: Production-grade algorithmic trading platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - trading
+  - algorithmic
+  - finance
+  - quant
+home: https://github.com/yourusername/QuantCLI
+sources:
+  - https://github.com/yourusername/QuantCLI
+maintainers:
+  - name: QuantCLI Team
+    email: team@quantcli.com
+dependencies:
+  - name: postgresql
+    version: "12.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "17.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: kafka
+    version: "23.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: kafka.enabled
+  - name: prometheus
+    version: "15.x.x"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: prometheus.enabled
+  - name: grafana
+    version: "6.x.x"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: grafana.enabled
