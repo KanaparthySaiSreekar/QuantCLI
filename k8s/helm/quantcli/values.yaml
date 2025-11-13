@@ -1,0 +1,413 @@
+# QuantCLI Helm Chart Values
+
+replicaCount: 3
+
+image:
+  repository: quantcli/trading-engine
+  pullPolicy: IfNotPresent
+  tag: "1.0.0"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/quantcli-trading-role
+  name: "quantcli-sa"
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+# Trading Engine Service
+tradingEngine:
+  enabled: true
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  
+  livenessProbe:
+    httpGet:
+      path: /health/live
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Data Ingestion Service
+dataIngestion:
+  enabled: true
+  replicaCount: 2
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+# Feature Engineering Service
+featureEngineering:
+  enabled: true
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+    requests:
+      cpu: 2000m
+      memory: 4Gi
+
+# Model Inference Service
+modelInference:
+  enabled: true
+  replicaCount: 5
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+      nvidia.com/gpu: 1  # Optional GPU
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+
+# Risk Management Service
+riskManagement:
+  enabled: true
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+# Backtesting Service (on-demand scaling)
+backtesting:
+  enabled: true
+  replicaCount: 0  # Scale to zero when not in use
+  resources:
+    limits:
+      cpu: 8000m
+      memory: 16Gi
+    requests:
+      cpu: 4000m
+      memory: 8Gi
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: trading.quantcli.internal
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: quantcli-tls
+      hosts:
+        - trading.quantcli.internal
+
+# PostgreSQL (TimescaleDB)
+postgresql:
+  enabled: true
+  auth:
+    existingSecret: quantcli-db-secret
+  primary:
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: gp3
+    resources:
+      limits:
+        cpu: 4000m
+        memory: 8Gi
+      requests:
+        cpu: 2000m
+        memory: 4Gi
+  readReplicas:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 100Gi
+
+# Redis Cluster
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    existingSecret: quantcli-redis-secret
+  master:
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+  replica:
+    replicaCount: 3
+    persistence:
+      enabled: true
+      size: 10Gi
+
+# Kafka
+kafka:
+  enabled: true
+  replicaCount: 3
+  auth:
+    clientProtocol: sasl
+    existingSecret: quantcli-kafka-secret
+  persistence:
+    enabled: true
+    size: 100Gi
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+
+# Prometheus
+prometheus:
+  enabled: true
+  server:
+    retention: "30d"
+    persistentVolume:
+      size: 50Gi
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+      requests:
+        cpu: 1000m
+        memory: 2Gi
+
+# Grafana
+grafana:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+  adminPassword:
+    existingSecret: quantcli-grafana-secret
+
+# Network Policies
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: quantcli-prod
+      ports:
+      - protocol: TCP
+        port: 8080
+  
+  egress:
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: quantcli-prod
+      ports:
+      - protocol: TCP
+        port: 5432  # PostgreSQL
+      - protocol: TCP
+        port: 6379  # Redis
+      - protocol: TCP
+        port: 9092  # Kafka
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Secrets Management
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  authPath: "auth/kubernetes"
+  role: "quantcli"
+  
+  secrets:
+    - secretPath: "secret/data/quantcli/api-keys"
+      keys:
+        - alpha_vantage_key
+        - tiingo_key
+        - fred_key
+        - finnhub_key
+    - secretPath: "secret/data/quantcli/ibkr"
+      keys:
+        - account_id
+        - username
+        - password
+
+# Monitoring and Alerting
+monitoring:
+  enabled: true
+  
+  prometheusRules:
+    - name: trading-alerts
+      rules:
+        - alert: HighLatency
+          expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High latency detected"
+        
+        - alert: HighErrorRate
+          expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High error rate detected"
+        
+        - alert: DailyLossLimitBreach
+          expr: daily_pnl_usd < -5000
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Daily loss limit breached - KILL SWITCH"
+
+# Service Mesh (Istio)
+serviceMesh:
+  enabled: true
+  istio:
+    enabled: true
+    
+    virtualService:
+      enabled: true
+      hosts:
+        - trading.quantcli.internal
+      
+      http:
+        - match:
+          - uri:
+              prefix: "/api/v1"
+          route:
+          - destination:
+              host: trading-engine
+              port:
+                number: 8080
+          timeout: 30s
+          retries:
+            attempts: 3
+            perTryTimeout: 10s
+    
+    destinationRule:
+      enabled: true
+      trafficPolicy:
+        connectionPool:
+          tcp:
+            maxConnections: 100
+          http:
+            http1MaxPendingRequests: 50
+            http2MaxRequests: 100
+        loadBalancer:
+          simple: LEAST_REQUEST
+        outlierDetection:
+          consecutiveErrors: 5
+          interval: 30s
+          baseEjectionTime: 30s
+
+# Compliance and Audit
+compliance:
+  auditLogging:
+    enabled: true
+    destination: s3://quantcli-audit-logs/
+    retention: 7y  # 7 years for regulatory compliance
+  
+  encryption:
+    atRest: true
+    inTransit: true
+    kmsKeyId: "arn:aws:kms:us-east-1:ACCOUNT:key/KEY_ID"
+
+# Disaster Recovery
+disasterRecovery:
+  enabled: true
+  backupSchedule: "0 2 * * *"  # Daily at 2 AM
+  backupRetention: 90d
+  crossRegionReplication: true
+  replicationRegion: "us-west-2"
+
+# Resource Quotas
+resourceQuota:
+  enabled: true
+  hard:
+    requests.cpu: "50"
+    requests.memory: "100Gi"
+    persistentvolumeclaims: "20"
+
+# Priority Classes
+priorityClass:
+  enabled: true
+  trading:
+    name: trading-high-priority
+    value: 1000
+    description: "High priority for trading engine"
+  backtesting:
+    name: backtesting-low-priority
+    value: 100
+    description: "Low priority for backtesting jobs"
