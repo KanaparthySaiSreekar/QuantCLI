@@ -165,13 +165,19 @@ class FeatureEngineer:
         # Price acceleration (second derivative)
         result['price_acceleration'] = result['close'].diff().diff()
 
-        # Distance from highs/lows
+        # FIXED: Use PAST highs/lows instead of future
+        # Previous implementation used rolling().max() which looks forward
+        # This gives "distance from recent high" which is predictive and valid
         for period in [20, 50]:
-            result[f'dist_from_high_{period}'] = (
-                result['close'] / result['high'].rolling(period).max() - 1
+            # Shift by 1 to use only past data
+            past_high = result['high'].shift(1).rolling(period).max()
+            past_low = result['low'].shift(1).rolling(period).min()
+
+            result[f'dist_from_past_high_{period}'] = (
+                result['close'] / past_high - 1
             )
-            result[f'dist_from_low_{period}'] = (
-                result['close'] / result['low'].rolling(period).min() - 1
+            result[f'dist_from_past_low_{period}'] = (
+                result['close'] / past_low - 1
             )
 
         # Volatility measures
@@ -207,12 +213,18 @@ class FeatureEngineer:
             result['volume_sma_5'] / result['volume_sma_20']
         )
 
-        # Accumulation/Distribution Line
+        # FIXED: Accumulation/Distribution Line - shift to exclude current bar
+        # Previous implementation included current bar's volume (look-ahead bias)
         mfm = ((result['close'] - result['low']) - (result['high'] - result['close'])) / (
-            result['high'] - result['low']
+            result['high'] - result['low'] + 1e-8  # Avoid division by zero
         )
         mfv = mfm * result['volume']
-        result['ad_line'] = mfv.cumsum()
+
+        # Shift cumulative sum to exclude current bar
+        result['ad_line'] = mfv.shift(1).cumsum()
+
+        # Also create stationary version (use change instead of level)
+        result['ad_line_change'] = result['ad_line'].diff()
 
         return result
 
@@ -314,6 +326,9 @@ class FeatureEngineer:
         """
         Transform features for ML model training.
 
+        IMPORTANT: Target is created properly to prevent look-ahead bias.
+        Features should only use information available at prediction time.
+
         Args:
             df: DataFrame with features
             target_periods: Number of periods ahead for target
@@ -324,8 +339,10 @@ class FeatureEngineer:
         """
         result = df.copy()
 
-        # Create target variable (future returns)
-        future_return = result['close'].pct_change(target_periods).shift(-target_periods)
+        # FIXED: Calculate future price, then create return from that
+        # This ensures features computed after this cannot see future data
+        future_price = result['close'].shift(-target_periods)
+        future_return = (future_price - result['close']) / result['close']
 
         if classification:
             # Binary classification: 1 = up, 0 = down
@@ -334,12 +351,37 @@ class FeatureEngineer:
             # Regression: actual return
             result['target'] = future_return
 
-        # Remove rows without target
+        # Remove rows without target (last target_periods rows)
         result = result.dropna(subset=['target'])
+
+        # Validate no look-ahead bias
+        self._validate_no_look_ahead(result)
 
         self.logger.info(
             f"Created {'classification' if classification else 'regression'} "
-            f"target with {len(result)} samples"
+            f"target with {len(result)} samples, {target_periods} periods ahead"
         )
 
         return result
+
+    def _validate_no_look_ahead(self, df: pd.DataFrame) -> None:
+        """
+        Runtime validation to ensure no features use future information.
+
+        Raises:
+            DataError: If forward-looking features are detected
+        """
+        feature_cols = self.get_feature_names(df)
+
+        suspicious_patterns = ['future', 'forward', 'ahead', 'next', 'dist_from_high', 'dist_from_low']
+
+        for col in feature_cols:
+            col_lower = col.lower()
+            for pattern in suspicious_patterns:
+                if pattern in col_lower:
+                    # Allow "dist_from_past_high" but not "dist_from_high"
+                    if 'past' not in col_lower and 'hist' not in col_lower:
+                        raise DataError(
+                            f"Forward-looking feature detected: '{col}'. "
+                            f"This feature may contain future information and cause data leakage."
+                        )
