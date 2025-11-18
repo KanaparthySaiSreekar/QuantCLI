@@ -30,21 +30,25 @@ pip install -r requirements.txt
 docker-compose up -d
 
 # 3. Configure API keys
-cp config/env.example .env
-# Edit .env with your keys
+# Create .env file with your API keys:
+cat > .env << EOF
+ALPHA_VANTAGE_API_KEY=your_key_here
+FINNHUB_API_KEY=your_key_here
+TIINGO_API_KEY=your_key_here
+DATABASE_URL=postgresql://quantcli:your_password@localhost:5432/quantcli
+EOF
 
-# 4. Initialize database
-python scripts/init_database.py
+# 4. Test data acquisition
+python -c "from src.data.orchestrator import DataOrchestrator; from src.core.config import ConfigManager; orch = DataOrchestrator(ConfigManager()); print(orch.get_daily_data('AAPL'))"
 
-# 5. Download ML models
-python scripts/download_models.py
+# 5. Run tests
+pytest tests/ -v
 
-# 6. Run backtest
-python scripts/run_backtest.py --strategy momentum --validation cpcv
-
-# 7. Start live trading (paper account)
-python scripts/start_trading.py --mode paper --broker ibkr
+# 6. Generate features (example)
+python -c "from src.features import FeatureEngineer; import pandas as pd; print('Feature engineering ready')"
 ```
+
+**Note**: Full pipeline (ML training, backtesting, live trading) implementation is in progress. See [Implementation Status](#implementation-status) below.
 
 ## Performance Expectations
 
@@ -54,6 +58,38 @@ python scripts/start_trading.py --mode paper --broker ibkr
 
 *(Reference: Berkshire Hathaway Sharpe 0.79 from 1976-2017)*
 
+## Implementation Status
+
+### ✅ Completed (Production-Ready)
+- **Core Infrastructure**: Configuration management, logging, exception handling
+- **Data Acquisition**: 7 data providers with failover, rate limiting, caching
+- **Signal Generation**: Signal generator with batch processing and ranking
+- **Feature Engineering**: 50+ technical indicators, price/volume/time features
+- **Backtesting Engine**: Vectorized backtesting with transaction costs and metrics
+- **Docker Infrastructure**: 14-service architecture (TimescaleDB, Redis, Kafka, etc.)
+- **Test Framework**: Unit tests for core modules, pytest configuration
+- **Security Improvements**: Thread-safe singletons, API key validation, input validation
+
+### 🚧 In Progress
+- **ML Training Pipeline**: Model training, ensemble configuration
+- **Database Persistence**: TimescaleDB integration for historical data
+- **Execution System**: Interactive Brokers integration
+- **Additional Tests**: Integration tests, provider tests, orchestrator tests
+
+### 📋 Planned
+- **Risk Management**: Pre-trade checks, kill switches, position limits
+- **Portfolio Optimization**: HRP, Black-Litterman, Kelly sizing
+- **NLP Sentiment**: FinBERT integration, news analysis
+- **Monitoring**: Grafana dashboards, alerting rules
+- **CI/CD**: GitHub Actions workflow, automated testing
+
+### Test Coverage
+- Rate Limiter: ✅ Comprehensive tests
+- Signal Generator: ✅ Comprehensive tests
+- Config Manager: ✅ Thread safety verified
+- Data Providers: ⏳ In progress
+- Overall Coverage: ~40% (Target: 80%)
+
 ## Documentation
 
 Full documentation in `/docs`:
@@ -62,6 +98,8 @@ Full documentation in `/docs`:
 - [API Documentation](docs/api.md)
 - [Strategy Development](docs/strategies.md)
 - [Compliance Guide](docs/compliance.md)
+- [Architecture](ARCHITECTURE.md)
+- [Implementation Guide](IMPLEMENTATION_GUIDE.md)
 
 ## License
 

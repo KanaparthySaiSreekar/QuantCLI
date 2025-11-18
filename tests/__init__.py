@@ -1,0 +1,1 @@
+"""QuantCLI test suite."""
