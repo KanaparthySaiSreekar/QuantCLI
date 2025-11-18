@@ -1,0 +1,12 @@
+# Feast Feature Store Configuration for QuantCLI
+# Ensures identical offline (training) and online (serving) features
+
+project: quantcli
+registry: data/registry.db
+provider: local
+online_store:
+  type: redis
+  connection_string: "localhost:6379"
+offline_store:
+  type: file
+entity_key_serialization_version: 2
