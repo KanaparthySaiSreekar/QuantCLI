@@ -3,6 +3,7 @@ Base data provider class with rate limiting, caching, and retry logic.
 """
 
 import time
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -22,7 +23,11 @@ logger = get_logger(__name__)
 
 
 class RateLimiter:
-    """Token bucket rate limiter."""
+    """
+    Thread-safe token bucket rate limiter.
+
+    Uses a lock to ensure thread-safe token acquisition in concurrent scenarios.
+    """
 
     def __init__(self, calls: int, period: int):
         """
@@ -36,10 +41,13 @@ class RateLimiter:
         self.period = period
         self.tokens = calls
         self.last_update = time.time()
+        self._lock = threading.Lock()
 
     def acquire(self, blocking: bool = True) -> bool:
         """
         Acquire a token for making a request.
+
+        Thread-safe implementation using locking.
 
         Args:
             blocking: If True, wait until token available
@@ -47,29 +55,30 @@ class RateLimiter:
         Returns:
             True if token acquired, False otherwise
         """
-        now = time.time()
-        elapsed = now - self.last_update
+        with self._lock:
+            now = time.time()
+            elapsed = now - self.last_update
 
-        # Refill tokens based on elapsed time
-        self.tokens = min(
-            self.calls,
-            self.tokens + (elapsed * self.calls / self.period)
-        )
-        self.last_update = now
+            # Refill tokens based on elapsed time
+            self.tokens = min(
+                self.calls,
+                self.tokens + (elapsed * self.calls / self.period)
+            )
+            self.last_update = now
 
-        if self.tokens >= 1:
-            self.tokens -= 1
-            return True
-        elif blocking:
-            # Wait until next token available
-            sleep_time = (1 - self.tokens) * self.period / self.calls
-            logger.debug(f"Rate limit reached, sleeping for {sleep_time:.2f}s")
-            time.sleep(sleep_time)
-            self.tokens = 0
-            self.last_update = time.time()
-            return True
-        else:
-            return False
+            if self.tokens >= 1:
+                self.tokens -= 1
+                return True
+            elif blocking:
+                # Wait until next token available
+                sleep_time = (1 - self.tokens) * self.period / self.calls
+                logger.debug(f"Rate limit reached, sleeping for {sleep_time:.2f}s")
+                time.sleep(sleep_time)
+                self.tokens = 0
+                self.last_update = time.time()
+                return True
+            else:
+                return False
 
 
 class BaseDataProvider(ABC):
@@ -138,6 +147,8 @@ class BaseDataProvider(ABC):
 
         # API key (if applicable)
         self.api_key = self.provider_config.get('api_key', '')
+        if self.api_key:
+            self._validate_api_key(self.api_key)
 
     def _create_session(self) -> requests.Session:
         """Create requests session with retry logic."""
@@ -160,6 +171,64 @@ class BaseDataProvider(ABC):
         session.timeout = timeout
 
         return session
+
+    @staticmethod
+    def _validate_api_key(api_key: str, min_length: int = 16) -> None:
+        """
+        Validate API key format and security.
+
+        Args:
+            api_key: API key to validate
+            min_length: Minimum expected key length
+
+        Raises:
+            DataError: If API key appears invalid
+        """
+        if not api_key or not isinstance(api_key, str):
+            raise DataError("API key must be a non-empty string")
+
+        # Check for whitespace
+        if any(c in api_key for c in [' ', '\n', '\t', '\r']):
+            raise DataError("API key contains invalid whitespace characters")
+
+        # Check minimum length
+        if len(api_key) < min_length:
+            raise DataError(
+                f"API key appears invalid (too short: {len(api_key)} chars, "
+                f"expected at least {min_length})"
+            )
+
+        # Check for common placeholders
+        placeholders = ['your_api_key', 'api_key_here', 'changeme', 'example', 'test']
+        if any(placeholder in api_key.lower() for placeholder in placeholders):
+            raise DataError(
+                "API key appears to be a placeholder. "
+                "Please set a valid API key in configuration."
+            )
+
+    @staticmethod
+    def _sanitize_api_key(api_key: str) -> str:
+        """
+        Sanitize API key for safe logging.
+
+        Shows only first and last 4 characters, masks the rest.
+
+        Args:
+            api_key: API key to sanitize
+
+        Returns:
+            Sanitized API key string
+
+        Example:
+            >>> _sanitize_api_key("abcdefghijklmnopqrstuvwxyz")
+            "abcd****wxyz"
+        """
+        if not api_key or len(api_key) < 8:
+            return "****"
+
+        prefix = api_key[:4]
+        suffix = api_key[-4:]
+        return f"{prefix}****{suffix}"
 
     def _check_rate_limits(self):
         """Check and acquire tokens from all rate limiters."""

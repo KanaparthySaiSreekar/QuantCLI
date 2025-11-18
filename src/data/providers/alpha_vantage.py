@@ -3,6 +3,7 @@ Alpha Vantage data provider.
 25 calls/day, 5 calls/minute free tier.
 """
 
+import time
 from datetime import datetime
 from typing import Optional, Dict, List
 import pandas as pd
@@ -132,7 +133,6 @@ class AlphaVantageProvider(BaseDataProvider):
         # Check cache (shorter TTL for quotes)
         if cache_key in self.cache:
             data, timestamp = self.cache[cache_key]
-            import time
             if time.time() - timestamp < 60:  # 1 minute cache
                 return data
 
@@ -149,7 +149,6 @@ class AlphaVantageProvider(BaseDataProvider):
             }
 
             # Cache with short TTL
-            import time
             self.cache[cache_key] = (quote, time.time())
 
             return quote

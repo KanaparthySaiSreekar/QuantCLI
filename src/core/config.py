@@ -3,12 +3,15 @@ Configuration management for QuantCLI.
 """
 
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
+
+from .exceptions import ConfigurationError
 
 
 class ConfigManager:
@@ -16,15 +19,20 @@ class ConfigManager:
     Centralized configuration management.
 
     Loads configuration from YAML files and environment variables.
+    Thread-safe singleton implementation using double-checked locking.
     """
 
     _instance = None
+    _lock = threading.Lock()
     _configs: Dict[str, Any] = {}
 
     def __new__(cls):
+        # Double-checked locking for thread safety
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialize()
         return cls._instance
 
     def _initialize(self):
@@ -106,29 +114,109 @@ class ConfigManager:
 
 
 class DatabaseSettings(BaseSettings):
-    """Database configuration."""
-    database_url: str = Field(default="postgresql://quantcli:changeme@localhost:5432/quantcli")
-    pool_size: int = 20
-    max_overflow: int = 40
-    pool_timeout: int = 30
-    pool_recycle: int = 3600
+    """
+    Database configuration.
+
+    All settings should be provided via environment variables.
+    DATABASE_URL format: postgresql://user:password@host:port/dbname
+    """
+    database_url: str = Field(
+        ...,  # Required field, no default
+        description="PostgreSQL connection URL. Must be set via DATABASE_URL env var."
+    )
+    pool_size: int = Field(default=20, description="Connection pool size")
+    max_overflow: int = Field(default=40, description="Max overflow connections")
+    pool_timeout: int = Field(default=30, description="Pool timeout in seconds")
+    pool_recycle: int = Field(default=3600, description="Pool recycle time in seconds")
+
+    @field_validator('database_url')
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        """Validate database URL format and security."""
+        if not v:
+            raise ConfigurationError("DATABASE_URL cannot be empty")
+
+        # Check for placeholder passwords
+        if 'changeme' in v.lower() or 'password' in v.lower():
+            raise ConfigurationError(
+                "DATABASE_URL contains placeholder password. "
+                "Set a secure password via environment variable."
+            )
+
+        # Basic URL format validation
+        if not v.startswith('postgresql://') and not v.startswith('postgres://'):
+            raise ConfigurationError(
+                "DATABASE_URL must start with 'postgresql://' or 'postgres://'"
+            )
+
+        return v
 
     class Config:
         env_file = ".env"
+        env_prefix = ""
 
 
 class RedisSettings(BaseSettings):
     """Redis configuration."""
-    redis_nodes: str = Field(default="localhost:7000,localhost:7001,localhost:7002")
-    redis_password: str = Field(default="")
+    redis_nodes: str = Field(
+        default="localhost:7000,localhost:7001,localhost:7002",
+        description="Comma-separated Redis nodes in format host:port"
+    )
+    redis_password: str = Field(default="", description="Redis cluster password")
 
     @property
     def nodes_list(self):
-        """Parse Redis nodes string into list of tuples."""
+        """
+        Parse Redis nodes string into list of tuples.
+
+        Returns:
+            List of (host, port) tuples
+
+        Raises:
+            ConfigurationError: If node format is invalid
+        """
         nodes = []
         for node in self.redis_nodes.split(','):
-            host, port = node.strip().split(':')
-            nodes.append((host, int(port)))
+            node = node.strip()
+            try:
+                parts = node.split(':')
+                if len(parts) != 2:
+                    raise ConfigurationError(
+                        f"Invalid Redis node format: '{node}'. Expected 'host:port'"
+                    )
+
+                host, port_str = parts
+
+                # Validate hostname
+                if not host:
+                    raise ConfigurationError(f"Empty hostname in Redis node: '{node}'")
+
+                # Validate port
+                try:
+                    port = int(port_str)
+                except ValueError as e:
+                    raise ConfigurationError(
+                        f"Invalid port '{port_str}' in Redis node '{node}': must be numeric"
+                    ) from e
+
+                # Validate port range
+                if not (0 < port <= 65535):
+                    raise ConfigurationError(
+                        f"Invalid port {port} in Redis node '{node}': must be 1-65535"
+                    )
+
+                nodes.append((host, port))
+
+            except ConfigurationError:
+                raise
+            except Exception as e:
+                raise ConfigurationError(
+                    f"Failed to parse Redis node '{node}': {e}"
+                ) from e
+
+        if not nodes:
+            raise ConfigurationError("No valid Redis nodes configured")
+
         return nodes
 
     class Config:
