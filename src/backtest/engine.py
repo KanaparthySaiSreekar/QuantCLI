@@ -200,8 +200,9 @@ class BacktestEngine:
         Signals (1, -1, 0) → Positions (1, -1, 0)
         Position held until signal changes.
         """
+        # FIXED: Use .ffill() instead of deprecated fillna(method='ffill')
         # Forward fill signals to maintain positions
-        positions = signals.replace(0, np.nan).fillna(method='ffill').fillna(0)
+        positions = signals.replace(0, np.nan).ffill().fillna(0)
         return positions
 
     def _apply_costs(self, prices: pd.Series, positions: pd.Series) -> pd.Series:
