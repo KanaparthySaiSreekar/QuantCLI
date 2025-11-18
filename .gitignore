@@ -58,8 +58,8 @@ htmlcov/
 *.log
 logs/
 
-# ML artifacts
-models/
+# ML artifacts (trained models, not source code)
+/models/
 *.pkl
 *.h5
 *.onnx
