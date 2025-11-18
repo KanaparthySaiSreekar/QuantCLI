@@ -1,0 +1,79 @@
+# Prometheus configuration for QuantCLI local development
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: 'local'
+    cluster: 'quantcli-local'
+
+# Alertmanager configuration (optional for local)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Python application metrics (when running)
+  - job_name: 'quantcli-trading-engine'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+        labels:
+          service: 'trading-engine'
+          component: 'main'
+    # Relabel to make metrics more useful
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'quantcli_.*'
+        action: keep
+
+  # PostgreSQL/TimescaleDB metrics (if postgres_exporter is added)
+  - job_name: 'timescaledb'
+    static_configs:
+      - targets: ['timescaledb:5432']
+        labels:
+          service: 'timescaledb'
+          database: 'quantcli'
+
+  # Redis metrics (if redis_exporter is added)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          service: 'redis'
+
+  # Kafka metrics (if kafka_exporter is added)
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9092']
+        labels:
+          service: 'kafka'
+
+  # Node exporter for system metrics (if added)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
+        labels:
+          service: 'node-exporter'
+
+# Recording rules for pre-aggregated metrics
+# recording_rules:
+#   - name: trading_performance
+#     interval: 1m
+#     rules:
+#       - record: quantcli:sharpe_ratio:5m
+#         expr: |
+#           (avg_over_time(quantcli_daily_return[5m]) / stddev_over_time(quantcli_daily_return[5m])) * sqrt(252)
