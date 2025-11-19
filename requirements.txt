@@ -40,13 +40,17 @@ xgboost==2.0.3
 lightgbm==4.1.0
 catboost==1.2.2
 optuna==3.5.0  # Hyperparameter optimization
+shap==0.44.0  # Model explainability for AI Copilot
 
 # Deep Learning
 torch==2.1.2
 tensorflow==2.15.0
 keras==2.15.0
-transformers==4.36.2  # For FinBERT
+transformers==4.36.2  # For FinBERT and AI Copilot
 huggingface-hub==0.20.2
+accelerate==0.25.0  # Fast model loading
+bitsandbytes==0.41.3  # 4-bit quantization for LLMs
+sentencepiece==0.1.99  # Tokenization for some models
 
 # ML Optimization
 onnx==1.15.0
