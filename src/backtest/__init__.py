@@ -1,5 +1,39 @@
-"""Backtesting module for QuantCLI."""
+"""
+Backtesting module for QuantCLI.
 
-from .engine import BacktestEngine, BacktestResult
+Industry-standard backtesting with:
+- Advanced transaction cost models
+- Short selling support
+- Walk-forward analysis
+- Monte Carlo simulation
+- Comprehensive performance metrics
+"""
 
-__all__ = ['BacktestEngine', 'BacktestResult']
+from .engine import (
+    BacktestEngine,
+    BacktestResult,
+    CostModel,
+    FillModel,
+    WalkForwardAnalyzer,
+    MonteCarloSimulator
+)
+
+from .cpcv import (
+    CombinatorialPurgedCV,
+    BacktestValidator,
+    cpcv_indices,
+    validate_model_for_production
+)
+
+__all__ = [
+    'BacktestEngine',
+    'BacktestResult',
+    'CostModel',
+    'FillModel',
+    'WalkForwardAnalyzer',
+    'MonteCarloSimulator',
+    'CombinatorialPurgedCV',
+    'BacktestValidator',
+    'cpcv_indices',
+    'validate_model_for_production'
+]
