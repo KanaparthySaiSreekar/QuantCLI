@@ -18,7 +18,7 @@ QuantCLI is an **enterprise-grade algorithmic trading platform** with a solid ar
 
 | Phase | Status | Time | Key Focus |
 |-------|--------|------|-----------|
-| **Week 1** | 60% Complete | 6.5h | Data leakage fixes (+10-18% Sharpe) |
+| **Week 1** | 85.7% Complete | 6.5h | Data leakage fixes (+10-18% Sharpe) |
 | **Week 2** | Not Started | 11h | Production stability (ensemble, monitoring) |
 | **Week 3** | Not Started | 11h | Performance optimization (caching, parallelization) |
 | **Week 4+** | Not Started | 30h | Critical features (IBKR, testing, API) |
@@ -48,7 +48,7 @@ QuantCLI is an **enterprise-grade algorithmic trading platform** with a solid ar
 3. **ML Foundations**: Ensemble models, CPCV validation, drift detection implemented
 4. **Database Design**: Professional TimescaleDB schema with continuous aggregates
 5. **Infrastructure**: Full K8s/Helm charts, Docker Compose, Terraform configurations
-6. **Week 1 ML Fixes**: 60% complete - data leakage issues resolved
+6. **Week 1 ML Fixes**: 85.7% complete - data leakage issues resolved, CPCV integrated
 
 ### Critical Gaps 🔴
 
@@ -814,7 +814,7 @@ After Week 3 optimizations (per ML_FIXES_STATUS.md):
 
 ## 📈 ML Implementation Status
 
-### Completed (Week 1 - 60%) ✅
+### Completed (Week 1 - 85.7%) ✅
 
 From ML_FIXES_STATUS.md:
 
@@ -823,20 +823,20 @@ From ML_FIXES_STATUS.md:
 3. ✅ **Fixed cumulative feature leakage** (+1-3% Sharpe)
 4. ✅ **Fixed deprecated pandas method** (prevents crashes)
 5. ✅ **Added feature validation** (prevents future leakage)
+6. ✅ **Enable CPCV validation properly** (2 hours) - **COMPLETED**
+   - CPCV fully integrated with ModelTrainer (src/models/trainer.py:287-381)
+   - Supports validation_method='cpcv' parameter
+   - Implements purging and embargo correctly
 
 **Estimated improvement: +10-18% Sharpe ratio in live trading**
 
-### Week 1 Remaining (40% - 4 hours) 🟡
-
-6. ⏳ **Enable CPCV validation properly** (2 hours)
-   - CPCV exists but not integrated with ModelTrainer
-   - Random splits used instead (violates time-series integrity)
+### Week 1 Remaining (14.3% - 2 hours) 🟡
 
 7. ⏳ **Implement drift detection integration** (2 hours)
-   - Code exists but not connected to:
-     - Prometheus metrics
-     - Automatic retraining
-     - Dashboard visualization
+   - Code exists (src/monitoring/drift_detection.py) but not connected to:
+     - Prometheus metrics (no prometheus_client integration)
+     - Automatic retraining (only examples in docstrings)
+     - Dashboard visualization (no actual integration)
 
 ### Week 2: Production Stability (11 hours - Not Started) 📋
 
@@ -3849,9 +3849,9 @@ class NewsEventDetector:
 
 ### Immediate Actions (Next 2 Weeks)
 
-#### Week 1: Complete Critical ML Fixes (4 hours)
-1. ✅ Integrate CPCV with ModelTrainer (2 hours)
-2. ✅ Connect drift detection to monitoring (2 hours)
+#### Week 1: Complete Critical ML Fixes (4 hours) - 85.7% Complete
+1. ✅ Integrate CPCV with ModelTrainer (2 hours) - **COMPLETED**
+2. ⏳ Connect drift detection to monitoring (2 hours) - **IN PROGRESS**
 
 #### Week 2: Minimum Viable Production (40 hours)
 
@@ -4021,7 +4021,7 @@ With optimization and polish:
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| **ML_FIXES_STATUS.md** | Week 1-3 ML improvement plan | 60% complete |
+| **ML_FIXES_STATUS.md** | Week 1-3 ML improvement plan | Week 1: 85.7% complete |
 | **ML_ANALYSIS.md** | Technical analysis of ML issues | Complete |
 | **IMPLEMENTATION_PLAN.md** | 30-hour ML roadmap | Complete |
 | **ARCHITECTURE.md** | System architecture | Complete |
