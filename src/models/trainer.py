@@ -42,8 +42,10 @@ class ModelTrainer:
         self,
         model: BaseModel,
         task: str = "classification",
+        validation_method: str = "holdout",  # NEW: explicit validation method
         test_size: float = 0.2,
         val_size: float = 0.1,
+        n_splits: int = 5,
         random_state: int = 42,
         scale_features: bool = True
     ):
@@ -53,19 +55,25 @@ class ModelTrainer:
         Args:
             model: Model instance to train
             task: 'classification' or 'regression'
+            validation_method: 'holdout', 'timeseries', or 'cpcv'
             test_size: Fraction of data for test set
             val_size: Fraction of training data for validation
+            n_splits: Number of CV splits for time series methods
             random_state: Random seed
             scale_features: Whether to scale features
         """
         self.model = model
         self.task = task
+        self.validation_method = validation_method
         self.test_size = test_size
         self.val_size = val_size
+        self.n_splits = n_splits
         self.random_state = random_state
         self.scale_features = scale_features
 
+        # FIXED: Fit scaler ONCE, not per fold
         self.scaler = StandardScaler() if scale_features else None
+        self.scaler_fitted = False
         self.training_history = {}
 
         self.logger = logger
@@ -73,64 +81,69 @@ class ModelTrainer:
     def train(
         self,
         X: pd.DataFrame,
-        y: pd.Series,
-        time_series_split: bool = False,
-        n_splits: int = 5
+        y: pd.Series
     ) -> Dict[str, Any]:
         """
-        Train model with data splitting.
+        Train model with specified validation method.
 
         Args:
             X: Feature DataFrame
             y: Target Series
-            time_series_split: Use time series cross-validation
-            n_splits: Number of CV splits for time series
 
         Returns:
             Dictionary with training results
         """
         self.logger.info(f"Starting training for {self.model.model_name}")
+        self.logger.info(f"Validation method: {self.validation_method}")
         self.logger.info(f"Dataset: {len(X)} samples, {len(X.columns)} features")
 
         # Validate inputs
         self._validate_data(X, y)
 
-        # Split data
-        if time_series_split:
-            return self._train_time_series_cv(X, y, n_splits)
-        else:
+        # Route to appropriate validation method
+        if self.validation_method == "holdout":
             return self._train_holdout(X, y)
+        elif self.validation_method == "timeseries":
+            return self._train_time_series_cv(X, y)
+        elif self.validation_method == "cpcv":
+            return self._train_cpcv(X, y)
+        else:
+            raise ValueError(f"Unknown validation method: {self.validation_method}")
 
     def _train_holdout(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
-        """Train with holdout validation."""
-        # Split into train+val and test
-        X_temp, X_test, y_temp, y_test = train_test_split(
-            X, y,
-            test_size=self.test_size,
-            random_state=self.random_state,
-            stratify=y if self.task == 'classification' else None
-        )
+        """Train with time-aware holdout validation (NO random shuffle for time series)."""
+        # FIXED: Use time-aware split (no shuffle) instead of random split
+        n = len(X)
+        train_end = int(n * (1 - self.test_size - self.val_size))
+        val_end = int(n * (1 - self.test_size))
 
-        # Split train into train and val
+        X_train = X.iloc[:train_end]
+        y_train = y.iloc[:train_end]
+
         if self.val_size > 0:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_temp, y_temp,
-                test_size=self.val_size / (1 - self.test_size),
-                random_state=self.random_state,
-                stratify=y_temp if self.task == 'classification' else None
-            )
+            X_val = X.iloc[train_end:val_end]
+            y_val = y.iloc[train_end:val_end]
         else:
-            X_train, y_train = X_temp, y_temp
             X_val, y_val = None, None
 
+        X_test = X.iloc[val_end:]
+        y_test = y.iloc[val_end:]
+
         self.logger.info(
-            f"Split: train={len(X_train)}, val={len(X_val) if X_val is not None else 0}, "
+            f"Time-aware split: train={len(X_train)}, "
+            f"val={len(X_val) if X_val is not None else 0}, "
             f"test={len(X_test)}"
         )
 
-        # Scale features
+        # FIXED: Fit scaler ONLY on training data (once)
+        if self.scale_features and not self.scaler_fitted:
+            self.scaler.fit(X_train)
+            self.scaler_fitted = True
+            self.logger.info("Scaler fitted on training data only")
+
+        # Transform all sets with same scaler (no refitting)
         if self.scale_features:
-            X_train = self._scale_fit_transform(X_train)
+            X_train = self._scale_transform(X_train)
             if X_val is not None:
                 X_val = self._scale_transform(X_val)
             X_test = self._scale_transform(X_test)
@@ -188,25 +201,32 @@ class ModelTrainer:
     def _train_time_series_cv(
         self,
         X: pd.DataFrame,
-        y: pd.Series,
-        n_splits: int
+        y: pd.Series
     ) -> Dict[str, Any]:
         """Train with time series cross-validation."""
-        self.logger.info(f"Using time series CV with {n_splits} splits")
+        self.logger.info(f"Using time series CV with {self.n_splits} splits")
 
-        tscv = TimeSeriesSplit(n_splits=n_splits)
+        tscv = TimeSeriesSplit(n_splits=self.n_splits)
+
+        # FIXED: Fit scaler ONCE on initial training data
+        if self.scale_features and not self.scaler_fitted:
+            # Use first 80% for scaler fitting
+            train_size = int(len(X) * 0.8)
+            self.scaler.fit(X.iloc[:train_size])
+            self.scaler_fitted = True
+            self.logger.info("Scaler fitted on initial 80% of data")
 
         fold_scores = []
 
         for fold, (train_idx, val_idx) in enumerate(tscv.split(X), 1):
-            self.logger.info(f"Training fold {fold}/{n_splits}")
+            self.logger.info(f"Training fold {fold}/{self.n_splits}")
 
             X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
             y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-            # Scale
+            # FIXED: Transform only (DON'T refit scaler)
             if self.scale_features:
-                X_train = self._scale_fit_transform(X_train)
+                X_train = self._scale_transform(X_train)
                 X_val = self._scale_transform(X_val)
 
             # Train
@@ -214,13 +234,7 @@ class ModelTrainer:
 
             # Evaluate
             predictions = self.model.predict(X_val)
-
-            from sklearn.metrics import accuracy_score, mean_squared_error
-
-            if self.task == 'classification':
-                score = accuracy_score(y_val, predictions.round())
-            else:
-                score = -mean_squared_error(y_val, predictions)  # Negative MSE
+            score = self._calculate_fold_score(y_train, y_val, predictions)
 
             fold_scores.append(score)
             self.logger.info(f"Fold {fold} score: {score:.4f}")
@@ -232,21 +246,32 @@ class ModelTrainer:
             f"CV complete. Average score: {avg_score:.4f} (+/- {std_score:.4f})"
         )
 
-        # Final train on all data
+        # Final train on all data (except holdout test set)
         self.logger.info("Training final model on all data...")
 
-        if self.scale_features:
-            X_scaled = self._scale_fit_transform(X)
-        else:
-            X_scaled = X
+        test_size = int(len(X) * self.test_size)
+        X_train_full = X.iloc[:-test_size]
+        y_train_full = y.iloc[:-test_size]
+        X_test = X.iloc[-test_size:]
+        y_test = y.iloc[-test_size:]
 
-        final_metrics = self.model.train(X_scaled, y)
+        # FIXED: Transform only (scaler already fitted)
+        if self.scale_features:
+            X_train_full = self._scale_transform(X_train_full)
+            X_test = self._scale_transform(X_test)
+
+        final_metrics = self.model.train(X_train_full, y_train_full)
+
+        # Test set evaluation
+        test_predictions = self.model.predict(X_test)
+        test_metrics = self._calculate_metrics(y_test, test_predictions)
 
         self.training_history = {
             'cv_scores': fold_scores,
             'avg_cv_score': avg_score,
             'std_cv_score': std_score,
             'final_metrics': final_metrics,
+            'test_metrics': test_metrics,
             'n_samples': len(X),
             'trained_at': datetime.now().isoformat()
         }
@@ -255,24 +280,166 @@ class ModelTrainer:
             'cv_scores': fold_scores,
             'avg_score': avg_score,
             'std_score': std_score,
-            'final_metrics': final_metrics
+            'final_metrics': final_metrics,
+            'test_metrics': test_metrics
         }
 
-    def _scale_fit_transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Fit scaler and transform data."""
-        if self.scaler is None:
-            return X
+    def _train_cpcv(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
+        """
+        Train with Combinatorial Purged Cross-Validation.
 
-        X_scaled = self.scaler.fit_transform(X)
-        return pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+        This properly handles time series by:
+        1. Respecting temporal order
+        2. Purging overlapping samples
+        3. Embargoing recent samples
+        """
+        from src.backtest.cpcv import CombinatorialPurgedCV
+
+        self.logger.info(f"Using CPCV with {self.n_splits} splits")
+
+        # Initialize CPCV
+        cpcv = CombinatorialPurgedCV(
+            n_splits=self.n_splits,
+            n_test_splits=2,
+            purge_gap=5,  # 5 days purge
+            embargo_pct=0.01  # 1% embargo
+        )
+
+        # FIXED: Fit scaler ONCE on initial training data
+        if self.scale_features and not self.scaler_fitted:
+            # Use first 80% for scaler fitting
+            train_size = int(len(X) * 0.8)
+            self.scaler.fit(X.iloc[:train_size])
+            self.scaler_fitted = True
+            self.logger.info("Scaler fitted on initial 80% of data")
+
+        fold_scores = []
+
+        for fold, (train_idx, val_idx) in enumerate(cpcv.split(X), 1):
+            self.logger.info(f"Training fold {fold}/{cpcv.get_n_splits()}")
+
+            X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+
+            # FIXED: Transform only (DON'T refit scaler)
+            if self.scale_features:
+                X_train = self._scale_transform(X_train)
+                X_val = self._scale_transform(X_val)
+
+            # Train
+            self.model.train(X_train, y_train, X_val, y_val)
+
+            # Evaluate
+            predictions = self.model.predict(X_val)
+            score = self._calculate_fold_score(y_train, y_val, predictions)
+
+            fold_scores.append(score)
+            self.logger.info(f"Fold {fold} score: {score:.4f}")
+
+        avg_score = np.mean(fold_scores)
+        std_score = np.std(fold_scores)
+
+        self.logger.info(
+            f"CPCV complete. Average score: {avg_score:.4f} (+/- {std_score:.4f})"
+        )
+
+        # Final train on all data (except holdout test set)
+        self.logger.info("Training final model on all data...")
+
+        test_size = int(len(X) * self.test_size)
+        X_train_full = X.iloc[:-test_size]
+        y_train_full = y.iloc[:-test_size]
+        X_test = X.iloc[-test_size:]
+        y_test = y.iloc[-test_size:]
+
+        if self.scale_features:
+            X_train_full = self._scale_transform(X_train_full)
+            X_test = self._scale_transform(X_test)
+
+        final_metrics = self.model.train(X_train_full, y_train_full)
+
+        # Test set evaluation
+        test_predictions = self.model.predict(X_test)
+        test_metrics = self._calculate_metrics(y_test, test_predictions)
+
+        self.training_history = {
+            'cv_scores': fold_scores,
+            'avg_cv_score': avg_score,
+            'std_cv_score': std_score,
+            'final_metrics': final_metrics,
+            'test_metrics': test_metrics,
+            'n_samples': len(X),
+            'trained_at': datetime.now().isoformat()
+        }
+
+        return {
+            'cv_scores': fold_scores,
+            'avg_score': avg_score,
+            'std_score': std_score,
+            'final_metrics': final_metrics,
+            'test_metrics': test_metrics
+        }
 
     def _scale_transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Transform data using fitted scaler."""
-        if self.scaler is None:
+        """
+        Transform data using FITTED scaler (no refitting).
+
+        IMPORTANT: This method never refits the scaler. The scaler must be
+        fitted once on training data using scaler.fit() directly.
+        """
+        if self.scaler is None or not self.scaler_fitted:
             return X
 
         X_scaled = self.scaler.transform(X)
         return pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+
+    def _calculate_fold_score(
+        self,
+        y_train: pd.Series,
+        y_val: pd.Series,
+        y_pred: np.ndarray
+    ) -> float:
+        """Calculate single score for CV fold."""
+        from sklearn.metrics import accuracy_score, mean_squared_error
+
+        if self.task == 'classification':
+            return accuracy_score(y_val, y_pred.round())
+        else:
+            return -mean_squared_error(y_val, y_pred)  # Negative MSE
+
+    def _calculate_metrics(self, y_true: pd.Series, y_pred: np.ndarray) -> Dict:
+        """Calculate comprehensive metrics."""
+        from sklearn.metrics import (
+            accuracy_score, precision_score, recall_score, f1_score,
+            mean_squared_error, mean_absolute_error, r2_score
+        )
+
+        if self.task == 'classification':
+            return {
+                'accuracy': accuracy_score(y_true, y_pred.round()),
+                'precision': precision_score(
+                    y_true, y_pred.round(),
+                    average='weighted',
+                    zero_division=0
+                ),
+                'recall': recall_score(
+                    y_true, y_pred.round(),
+                    average='weighted',
+                    zero_division=0
+                ),
+                'f1': f1_score(
+                    y_true, y_pred.round(),
+                    average='weighted',
+                    zero_division=0
+                )
+            }
+        else:
+            return {
+                'mse': mean_squared_error(y_true, y_pred),
+                'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
+                'mae': mean_absolute_error(y_true, y_pred),
+                'r2': r2_score(y_true, y_pred)
+            }
 
     def _validate_data(self, X: pd.DataFrame, y: pd.Series) -> None:
         """Validate input data."""
