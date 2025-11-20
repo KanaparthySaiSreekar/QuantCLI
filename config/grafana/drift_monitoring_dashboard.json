@@ -1,0 +1,303 @@
+{
+  "dashboard": {
+    "title": "QuantCLI - Drift Detection & Model Monitoring",
+    "tags": ["quantcli", "ml", "drift", "monitoring"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Overall Drift PSI",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "quantcli_drift_psi",
+            "legendFormat": "PSI",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {"axisLabel": "PSI", "axisPlacement": "auto"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.1},
+                {"color": "red", "value": 0.2}
+              ]
+            }
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 2,
+        "title": "Drifted Features Count",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "quantcli_drift_drifted_features_count",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 3},
+                {"color": "red", "value": 5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Drift Checks Status",
+        "type": "piechart",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "sum by (status) (increase(quantcli_drift_checks_total[24h]))",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Last Drift Check",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "time() - quantcli_drift_last_check_timestamp",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "decimals": 0
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Retraining Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 4},
+        "targets": [
+          {
+            "expr": "quantcli_retraining_status",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "Idle", "color": "green"}}},
+              {"type": "value", "options": {"1": {"text": "Running", "color": "blue"}}},
+              {"type": "value", "options": {"2": {"text": "Failed", "color": "red"}}}
+            ]
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Top Drifted Features",
+        "type": "bargauge",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "topk(10, quantcli_drift_feature_psi)",
+            "legendFormat": "{{feature_name}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.1},
+                {"color": "orange", "value": 0.15},
+                {"color": "red", "value": 0.2}
+              ]
+            },
+            "min": 0,
+            "max": 0.3
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Retraining Events",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "sum by (reason) (increase(quantcli_retraining_triggered_total[24h]))",
+            "legendFormat": "{{reason}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Retraining Duration",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(quantcli_retraining_duration_seconds_bucket[1h]))",
+            "legendFormat": "p95",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(quantcli_retraining_duration_seconds_bucket[1h]))",
+            "legendFormat": "p50",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Model Performance",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "quantcli_model_performance{metric_type=\"accuracy\"}",
+            "legendFormat": "{{model_name}} - accuracy",
+            "refId": "A"
+          },
+          {
+            "expr": "quantcli_model_performance{metric_type=\"f1\"}",
+            "legendFormat": "{{model_name}} - f1",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Prediction Latency (p95)",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 22},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(quantcli_prediction_latency_ms_bucket[5m]))",
+            "legendFormat": "{{model_name}} p95",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Predictions Rate",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 22},
+        "targets": [
+          {
+            "expr": "sum by (model_name, status) (rate(quantcli_predictions_total[5m]))",
+            "legendFormat": "{{model_name}} - {{status}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "System Health",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 28},
+        "targets": [
+          {
+            "expr": "quantcli_system_health",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "green", "value": 90}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Component Health",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 18, "x": 6, "y": 28},
+        "targets": [
+          {
+            "expr": "quantcli_component_status",
+            "legendFormat": "{{component}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "Unhealthy", "color": "red"}}},
+              {"type": "value", "options": {"1": {"text": "Healthy", "color": "green"}}}
+            ]
+          }
+        },
+        "options": {
+          "orientation": "horizontal"
+        }
+      }
+    ]
+  }
+}

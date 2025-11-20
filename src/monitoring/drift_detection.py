@@ -19,8 +19,10 @@ from pathlib import Path
 
 from src.core.logging_config import get_logger
 from src.core.exceptions import ValidationError
+from src.monitoring.metrics import get_metrics
 
 logger = get_logger(__name__)
+metrics = get_metrics()
 
 
 @dataclass
@@ -249,6 +251,17 @@ class DriftDetector:
         )
         if is_significant:
             self.logger.warning(f"⚠️  {recommendation}")
+
+        # Record Prometheus metrics
+        try:
+            metrics.record_drift_check(
+                psi=overall_psi,
+                feature_psi=feature_psi,
+                drifted_features=drifted_features,
+                is_significant=is_significant
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to record drift metrics: {e}")
 
         return report
 
